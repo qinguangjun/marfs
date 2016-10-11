@@ -44,7 +44,7 @@ case "$1" in
 
 
     (PUT_SLEEP)
-    sleep 1
+    sleep 3
     ;& # fall through ...
 
     (PUT)    OP=4
@@ -74,6 +74,7 @@ fi
 echo "* $1: $URL"
 
 #--- define the op
+# CMD="curl -v -u root --digest $PARMS $CURL_ARGS $URL $DST"
 CMD="curl -sS -u root --digest $PARMS $CURL_ARGS $URL $DST"
 echo "cmd: $CMD"
 

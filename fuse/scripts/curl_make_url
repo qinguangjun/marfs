@@ -5,13 +5,27 @@
 # First argument is a namespace.  We'll pluck out the corresponding
 # iwrite_repo.  If the repo supports multiple hosts, we'll generate one of
 # them at random.
+#
+# NOTE: You'll have to have marfs_config in your path
 
 if (( ! ${#} )); then
-    echo "Usage: $0 <marfs_ns>"
+    echo "Usage: $0 <marfs_ns> [ <obj_name> ]"
+    exit 1
+
+elif [ -z `which marfs_config` ]; then
+    echo "you need the directory containing marfs_config (tool) in your PATH"
     exit 1
 fi
 
+
 NS="$1"
+
+if [ -z "$2" ]; then
+    OBJ=`date +"%Y%m%d_%H%M%S"`
+else
+    OBJ="$2"
+fi
+
 
 NS_OUT=`marfs_config -n "$NS"`
 NS_NAME=`  echo "$NS_OUT" | awk '/^[ \t]+name[ \t]/ {print $2}'`
@@ -24,10 +38,10 @@ HOST=`     echo "$REPO_OUT" | awk '/^[ \t]+host[ \t]/ {print $2}'`
 HOST_OFF=` echo "$REPO_OUT" | awk '/^[ \t]+host_offset[ \t]/ {print $2}'`
 HOST_CT=`  echo "$REPO_OUT" | awk '/^[ \t]+host_count[ \t]/ {print $2}'`
 
-DATE=`date +"%Y%m%d_%H%M%S"`
 
 
-URL="http://$HOST/$NS_ALIAS/$REPO_NAME/$DATE"
+URL="http://$HOST/$NS_ALIAS/$REPO_NAME/$OBJ"
+
 if (( $HOST_CT > 1 )); then
     URL=`printf "$URL" $(( (RANDOM % HOST_CT) + HOST_OFF ))`
 fi
