@@ -269,6 +269,7 @@ int marfs_flush (const char*        path,
 
    PathInfo*         info = &fh->info;                  /* shorthand */
    ObjectStream*     os   = &fh->os;
+   struct stat       true_stat;
 
    // It is now possible that we had never opened the stream, this
    // happens in the case of attempting to overwrite a file for which
@@ -310,6 +311,10 @@ int marfs_flush (const char*        path,
       if( !(fh->flags & FH_PACKED) ) {
          close_data(fh, 0, 1);
       }
+
+      // preserve timestamps so they can be restored following writing
+      // chunkinfo and setting xattrs.
+      TRY0( MD_PATH_OP(lstat, info->ns, info->post.md_path, &true_stat) );
    }
 
    // free aws4c resources if the file is not packed
@@ -404,6 +409,11 @@ int marfs_flush (const char*        path,
          TRY0( MD_PATH_OP(chmod, info->ns,
                           info->post.md_path, info->restart.mode) );
       }
+
+      struct utimbuf ut_buf;
+      ut_buf.actime  = true_stat.st_atime;
+      ut_buf.modtime = true_stat.st_mtime;
+      TRY_GE0( MD_PATH_OP(utime, info->ns, info->post.md_path, &ut_buf) );
    }
 
    EXIT();
