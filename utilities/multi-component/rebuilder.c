@@ -103,6 +103,7 @@ typedef struct stat_list {
 // global flag indicating a dry run.
 int   dry_run;
 int   verbose;
+int   ignore_open;
 FILE *error_log;
 
 // global rebuild statistics table.
@@ -356,6 +357,12 @@ void usage(const char *program) {
          "failure statistics from the logs.\n");
   printf("\nThe -o <filename> flag may be used to specify a file to which \n"
          "rebuild failures should be logged rather than standard output\n");
+  printf("\nThe rebuilder is conservative in its determination of whether an object"
+         " is open for writing. To make the rebuilder skip this check and rebuild"
+         " everything use the -f flag. You should only use this if you are sure that"
+         " no other writes are occuring on the component being rebuilt. It is always"
+         " safe to use this flag with log-based rebuilds since log entries are"
+         " only written after an object has been closed.\n");
   printf("\nTo run the rebuilder as some other user (ie. storageadmin) use "
          "the -u <username> option\n");
 }
@@ -373,6 +380,13 @@ int rebuild_object(struct object_file object) {
   ne_handle object_handle;
 
   if(dry_run) return;
+
+  // check that the object is not open.
+  if(!ignore_open && ne_is_open(object.path, object.n + object.e) > object.e) {
+    fprintf(error_log, "ERROR: cannot rebuild %s. Object is open.\n",
+            object.path);
+    return -1; // TBD: log something other than failure here.
+  }
 
   if(object.start_block < 0) { // component-based rebuild
     object_handle = ne_open(object.path, NE_REBUILD|NE_NOINFO);
@@ -708,9 +722,9 @@ int main(int argc, char **argv) {
   int            range_given = 0;
   struct passwd *pw = NULL;
   pod = block = cap = -1;
-  verbose = dry_run = 0;
+  ignore_open = verbose = dry_run = 0;
   error_log = stderr;
-  while((opt = getopt(argc, argv, "hH:c:p:b:r:t:dvs:o:u:")) != -1) {
+  while((opt = getopt(argc, argv, "fhH:c:p:b:r:t:dvs:o:u:")) != -1) {
     switch (opt) {
     case 'h':
       usage(argv[0]);
@@ -722,6 +736,9 @@ int main(int argc, char **argv) {
     case 'c':
       component_rebuild = 1;
       cap = strtol(optarg, NULL, 10);
+      break;
+    case 'f':
+      ignore_open = 1;
       break;
     case 'p':
       pod = strtol(optarg, NULL, 10);
