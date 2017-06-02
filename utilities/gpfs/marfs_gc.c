@@ -1748,23 +1748,25 @@ int process_packed(hash_table_t* ht, hash_table_t* rt)
       ht_header p_header = (ht_header) entry->payload;      
       file = p_header->files;
 
-      if ( rt  &&  (entry->value < p_header->chunks) ) {
-         // TODO check min_pack_file_count to determine canidacy for repack
-         fprintf( stderr, "%cINFO: repack canidate found, but repack is not implemented\n", sep_char );
-         sep_char = '\0';
-
-         // Get the post xattr to determine offset in the objec
-//       if ((getxattr(file->md_path, "user.marfs_post", &post_xattr, MARFS_MAX_XATTR_SIZE) != -1)) {
-//          //fprintf(stdout, "xattr = %s\n", post_xattr);
-//          rc = str_2_post(&post, post_xattr, 1);
-//          files->original_offset = post.obj_offset;
-//          LOG(LOG_INFO, "filename %s xattr = %s offset=%ld\n", files->filename, post_xattr,post.obj_offset);
-//       }
-
-         // TODO insert into rt table
-      }
       // If we are missing files from the packed object or a problem was found, skip the deletion
-      else if ( entry->value < p_header->chunks  ||  p_header->chunks == -1 ) {
+      if ( entry->value < p_header->chunks  ||  p_header->chunks == -1 ) {
+
+         if ( rt  &&  (p_header->chunks != -1) ) {
+            // TODO check min_pack_file_count to determine canidacy for repack
+            fprintf( stderr, "%cINFO: repack canidate found, but repack is not implemented\n", sep_char );
+            sep_char = '\0';
+
+            // Get the post xattr to determine offset in the objec
+//          if ((getxattr(file->md_path, "user.marfs_post", &post_xattr, MARFS_MAX_XATTR_SIZE) != -1)) {
+//             //fprintf(stdout, "xattr = %s\n", post_xattr);
+//             rc = str_2_post(&post, post_xattr, 1);
+//             files->original_offset = post.obj_offset;
+//             LOG(LOG_INFO, "filename %s xattr = %s offset=%ld\n", files->filename, post_xattr,post.obj_offset);
+//          }
+
+            // TODO insert into rt table
+
+         }
          //free the payload list
          free_packed_files( file, 0 );
          free( p_header );
