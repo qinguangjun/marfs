@@ -1023,7 +1023,7 @@ ssize_t mc_get(DAL_Context* ctx, char* buf, size_t size) {
 
 // Upon return no more I/O is possible. The stream is closed.
 //
-// If ne_close indicates a recoverable error, then the object is
+// If ne_close indicates an error, then the object is
 // logged to the "degraded object log".
 int mc_sync(DAL_Context* ctx) {
    ENTRY();
@@ -1043,7 +1043,8 @@ int mc_sync(DAL_Context* ctx) {
    // indicator of whether the data is degraded and, if so, which
    // block is corrupt or missing.
    int error_pattern = ne_close(handle);
-   if(error_pattern > 0) {
+//   if(error_pattern > 0) {
+   if(error_pattern != 0) {
       // Keeping the log message as well as writing to the degraded
       // object file for debugging purposes.
       LOG(LOG_INFO, "WARNING: Object %s degraded. Error pattern: 0x%x."
@@ -1083,7 +1084,8 @@ int mc_sync(DAL_Context* ctx) {
       }
       POST(&config->lock);
    }
-   else if(error_pattern < 0) {
+//   else if(error_pattern < 0) {
+   if(error_pattern < 0) {
       // close the stream, a failed sync renders the ne_handle
       // invalid calling mc_close should prevent marfs from ever
       // trying to use it again.
