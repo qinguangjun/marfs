@@ -85,7 +85,6 @@ OF SUCH DAMAGE.
 
 #include "marfs_configuration.h" // DAL_Type
 #include "xdal_common.h"
-
 #include <stdint.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -295,7 +294,12 @@ typedef int      (*dal_open) (DAL_Context* ctx,
                               size_t       chunk_offset,
                               size_t       content_length,
                               uint8_t      preserve_write_count,
-                              uint16_t     timeout);
+                              uint16_t     timeout, .../*
+			      int* copyCnt,
+			      int* totalBlks,
+			      double* totalHandleTime,
+			      double* totalErasureTime,
+			      uint16_t* histos*/);
 
 // Writes the data in the buffer to the object.
 //
@@ -364,7 +368,6 @@ typedef int      (*dal_update_object_location)(DAL_Context* ctx);
 typedef int      (*dal_delete)(DAL_Context*  ctx);
 
 
-
 // This is a collection of function-ptrs
 // They capture a given implementation of interaction with an MDFS.
 typedef struct DAL {
@@ -385,11 +388,8 @@ typedef struct DAL {
    dal_put                    put;
    dal_get                    get;
    dal_delete                 del;
-
    dal_update_object_location update_object_location;
-
 } DAL;
-
 
 // insert a new DAL, if there are no name-conflicts
 int  install_DAL(DAL* dal);

@@ -81,7 +81,7 @@ OF SUCH DAMAGE.
 #include "dal.h"                // abstraction for storage ops
 #include "object_stream.h"      // FileHandle needs ObjectStream
 #include "marfs_configuration.h"
-
+#include "fast_timer.h"
 #include <stdint.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -636,8 +636,16 @@ typedef struct {
    struct DAL*  dal;
 } DAL_Handle;
 
+typedef struct
+{
+	//double totalHandleTime;
+	//double totalErasureTime;
+	uint16_t histo[65];
+}TimingStats;
 
 
+#define DEFAULT_MAX_SIZE 32
+#define MULTIPLIER 2
 typedef struct {
    PathInfo        info;         // includes xattrs, MDFS path, etc
    char            ns_path[MARFS_MAX_NS_PATH];  // path in NS, not in MDFS
@@ -669,7 +677,17 @@ typedef struct {
    curl_off_t      objectSize;   // The size of the object for packed files
    int             fileCount;    // The number of files that have been packed
                                  // into the file
-
+   //ne_handle       mc_handle;
+   //ne_handle*      saved_handles; //this is used to access ne_handles for timing data to be sent
+   //int count;
+   //int max_size;
+   int             copyCnt;
+   unsigned int    num_pods;
+   int             totalBlks;
+   double          totalHandleTime;
+   double          totalErasureTime;
+   uint16_t*       histos1;
+   int             timingFlag;
    FHFlagType      flags;
 } MarFS_FileHandle;
 

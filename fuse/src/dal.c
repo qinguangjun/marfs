@@ -75,7 +75,7 @@ OF SUCH DAMAGE.
 #include "logging.h"
 #include "dal.h"
 #include "common.h"
-
+#include <stdarg.h>
 #include <stdlib.h>             // malloc()
 #include <errno.h>
 #include <stdarg.h>             // va_args for open()
@@ -203,7 +203,7 @@ int     obj_open(DAL_Context* ctx,
                  size_t       chunk_offset,
                  size_t       content_length,
                  uint8_t      preserve_write_count,
-                 uint16_t     timeout) {
+                 uint16_t     timeout, ...) {
 
    return stream_open(OS(ctx), is_put,
                       chunk_offset, content_length,
@@ -303,7 +303,7 @@ int     nop_open(DAL_Context* ctx,
                  size_t       chunk_offset,
                  size_t       content_length,
                  uint8_t      preserve_write_count,
-                 uint16_t     timeout) {
+                 uint16_t     timeout, ...) {
 
    return 0;
 }
@@ -460,7 +460,7 @@ int posix_dal_open(DAL_Context* ctx,
                    size_t       chunk_offset,
                    size_t       content_length,
                    uint8_t      preserve_write_count,
-                   uint16_t     timeout) {
+                   uint16_t     timeout, ...) {
    ENTRY();
 
    // fail if the path has not been generated. This should never
@@ -931,14 +931,12 @@ static uint64_t h_a(const uint64_t key, uint64_t a) {
 // Returns 0 on success or -1 on failure (if memory cannot be allocated).
 int mc_init(DAL_Context* ctx, struct DAL* dal, void* fh) {
    ENTRY();
-   
    ctx->data.ptr = malloc(sizeof(MC_Context));
    if(! MC_CONTEXT(ctx)) {
       LOG(LOG_ERR, "failed to allocate memory for MC_Context\n");
       return -1;
    }
    memset(MC_CONTEXT(ctx), 0, sizeof(MC_Context));
-
    // memset(MC_CONTEXT(ctx)->path_template, '\0', MC_MAX_PATH_LEN);   
    MC_FH(ctx) = (MarFS_FileHandle*)fh;
    // MC_HANDLE(ctx) = NULL;
@@ -1107,7 +1105,12 @@ int mc_open(DAL_Context* ctx,
             size_t chunk_offset,
             size_t content_length,
             uint8_t preserve_write_count,
-            uint16_t timeout) {
+            uint16_t timeout, .../*
+	    int* copyCnt,
+            int* totalBlks,
+            double* totalHandleTime,
+            double* totalErasureTime,
+            uint16_t* histos*/) {
    ENTRY();
 
    ObjectStream* os            = MC_OS(ctx);
@@ -1129,6 +1132,27 @@ int mc_open(DAL_Context* ctx,
                              impl, MC_CONFIG(ctx)->auth, timing_flags,
                              path_template, mode,
                              MC_CONTEXT(ctx)->start_block, n, e);
+
+   //get the arguments
+   va_list arg_list;
+   va_start(arg_list, timeout);
+   int num_pods = va_arg(arg_list, int);
+   int* copyCnt = va_arg(arg_list, int*);
+   int* totalBlks = va_arg(arg_list, int*);
+   double* totalHandleTime = va_arg(arg_list, double*);
+   double* totalErasureTime = va_arg(arg_list, double*);
+   uint16_t* histos = va_arg(arg_list, uint16_t*);
+   int* timingFlag = va_arg(arg_list, int*);
+   va_end(arg_list);  
+   //install time stats pointer into ne_handle
+   ne_handle mc_handle = MC_HANDLE(ctx);
+   *totalBlks = mc_handle->N + mc_handle->E;
+   mc_handle->num_pods = num_pods;
+   mc_handle->copyCnt = copyCnt;
+   mc_handle->totalHandleTime = totalHandleTime;
+   mc_handle->totalErasureTime = totalErasureTime;
+   mc_handle->histos = histos;
+   *timingFlag = timing_flags;
    if(! MC_HANDLE(ctx)) {
       LOG(LOG_ERR, "Failed to open MC Handle %s\n", path_template);
       return -1;
@@ -1236,7 +1260,7 @@ int mc_sync(DAL_Context* ctx) {
    ne_handle     handle     = MC_HANDLE(ctx);
    MC_Config*    config     = MC_CONFIG(ctx);
    MC_Context*   mc_context = MC_CONTEXT(ctx);
-   
+   MarFS_FileHandle* fh = MC_FH(ctx);
    if(! (os->flags & OSF_OPEN)) {
       LOG(LOG_ERR, "%s isn't open\n", os->url);
       errno = EINVAL;
@@ -1246,6 +1270,7 @@ int mc_sync(DAL_Context* ctx) {
    // the result of close for a handle opened for reading is an
    // indicator of whether the data is degraded and, if so, which
    // block is corrupt or missing.
+   
    int error_pattern = ne_close(handle);
    if(error_pattern > 0) {
 
@@ -1373,7 +1398,6 @@ DAL mc_dal = {
    .sync         = &mc_sync,
    .abort        = &mc_abort,
    .close        = &mc_close,
-
    .update_object_location = &mc_update_path
 };
 
@@ -1395,7 +1419,6 @@ DAL mc_sockets_dal = {
    .sync         = &mc_sync,
    .abort        = &mc_abort,
    .close        = &mc_close,
-
    .update_object_location = &mc_update_path
 };
 

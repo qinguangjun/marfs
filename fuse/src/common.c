@@ -987,7 +987,7 @@ int batch_post_process(const char* path, size_t file_size) {
    PathInfo info;
    memset((char*)&info, 0, sizeof(PathInfo));
    EXPAND_PATH_INFO(&info, path);
-
+   printf("IN BATCH POST _PROCESS PATH %s, FILE SIZE %ld\n", path, file_size);
    STAT_XATTRS(&info);
    if (has_all_xattrs(&info, MARFS_MD_XATTRS)) {
 
@@ -1823,7 +1823,7 @@ int open_data(MarFS_FileHandle* fh,
    ENTRY();
    int         flags;
    const char* flags_str;
-
+   int num_pods;
    if (writing_p) {
       flags     =  O_WRONLY;
       flags_str = "O_WRONLY";
@@ -1835,7 +1835,17 @@ int open_data(MarFS_FileHandle* fh,
 
    // if we haven't already initialized the FileHandle DAL, do it now.
    init_data(fh);
-
+	//we need to allocate the buffe
+   if (fh->histos1 == NULL)
+   {
+   	MC_Config* config = (MC_Config*)fh->dal_handle.dal->global_state;
+   	num_pods = config->num_pods;
+   	fh->num_pods = num_pods;
+   	fh->histos1 = (uint16_t*)malloc(sizeof(uint16_t) * MAXPARTS * 65 * 5 * num_pods);
+   	memset((void*)fh->histos1, 0, sizeof(uint16_t) * MAXPARTS * 65 * 5 * num_pods);
+   }
+   //MC_Config* config = (MC_Config*)fh->dal_handle.dal->global_state;
+   //printf("@@@@@@@@@@@@@@open_data num_pods %u\n", config->num_pods);
 #if USE_DAL
    TRY0( DAL_OP(update_object_location, fh) );
 #else
@@ -1847,11 +1857,11 @@ int open_data(MarFS_FileHandle* fh,
    //
    // if (! DAL_OP(is_open, fh))
    {
-      if (DAL_OP(open, fh, writing_p,
-                 chunk_offset, content_length, preserve_wr_count, timeout) ) {
+      if (DAL_OP(open, fh, writing_p, chunk_offset, content_length, preserve_wr_count, timeout, num_pods, &fh->copyCnt, &fh->totalBlks, &fh->totalHandleTime, &fh->totalErasureTime, fh->histos1, &fh->timingFlag) ) {
          LOG(LOG_ERR, "open_data() failed: %s\n", strerror(errno));
          return -1;
       }
+
    }
 
    LOG(LOG_INFO, "open_data() ok\n");
@@ -1859,6 +1869,34 @@ int open_data(MarFS_FileHandle* fh,
    return 0;
 }
 
+
+
+/*
+void save_ne_handle(MarFS_FileHandle* fh)
+{
+	if (fh->saved_handles == NULL)
+	{
+		//first allocate 
+		fh->saved_handles = (ne_handle*)malloc(sizeof(ne_handle) * DEFAULT_MAX_SIZE);
+		fh->max_size = DEFAULT_MAX_SIZE;
+	}
+	else if (fh->count == fh->max_size)
+	{
+		//we need to expand array
+		ne_handle* newArray = (ne_handle*)malloc(sizeof(ne_handle) * fh->max_size * MULTIPLIER);
+		memcpy((void*)newArray, (const void*) fh->saved_handles, sizeof(ne_handle) * fh->count);
+		free(fh->saved_handles);
+		fh->saved_handles = newArray;
+		fh->max_size = fh->max_size * MULTIPLIER;
+	}
+	
+	//save ne_handle
+	printf("saving mc_handle value %p\n", fh->mc_handle);
+	fh->saved_handles[fh->count] = fh->mc_handle;
+	fh->count++;
+
+}
+*/
 
 // Standard idiom for closing data-streams is something like
 //    DAL_OP(sync, fh);
@@ -1876,7 +1914,6 @@ int close_data(MarFS_FileHandle* fh,
 
    int retval = 0;
    int rc;
-
    // try the abort/sync
    if (abort)
       rc = DAL_OP(abort, fh);
@@ -1904,7 +1941,7 @@ int close_data(MarFS_FileHandle* fh,
       LOG(LOG_ERR, "destroy failed\n");
       retval = rc;
    }
-
+   //we can always save the ne_handles her
    return retval;
 }
 
@@ -2041,9 +2078,18 @@ int open_md(MarFS_FileHandle* fh, int writing_p) {
 #if USE_MDAL
    if (! F_MDAL(fh)) {
       // copy static MDAL ptr from NS to FileHandle
+      if(info->pre.ns == NULL)
+      {
+	 printf("ERROR: Marfs Namespace became NULL!\nPOSSIBLE REASON: File might have been unlinked by another writer that started later than you!\n");
+	 exit(-1);
+      }
+      else
+      {
+	 printf("OPEN_MD INFO->PRE.NS Pointer Val %p\n", info->pre.ns);
+      }
       F_MDAL(fh) = info->pre.ns->file_MDAL;
       LOG(LOG_INFO, "file-MDAL: %s\n", F_MDAL(fh)->name);
-
+      printf("AFTER file_MDAL\n");
       // allow MDAL implementation to do custom initializations
       F_OP(f_init, fh, F_MDAL(fh));
    }

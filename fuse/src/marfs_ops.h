@@ -142,6 +142,10 @@ int  marfs_open          (const char* path, MarFS_FileHandle* fh, int flags,
 int  marfs_open_packed   (const char* path, MarFS_FileHandle* fh, int flags,
                           curl_off_t content_length);
 
+int marfs_getTimingStats(ne_handle handle, int totalBlks, TimingStats* stats);
+
+unsigned int marfs_getNumPods();
+
 int  marfs_open_at_offset(const char* path, MarFS_FileHandle* fh, int flags,
                           curl_off_t offset, curl_off_t content_length);
 

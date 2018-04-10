@@ -572,7 +572,6 @@ int marfs_getattr (const char*  path,
 
    // Check/act on iperms from expanded_path_info_structure, this op requires RM
    CHECK_PERMS(info.ns, R_META);
-
    // The "root" namespace is artificial.  If it is configured to refer to
    // a real MDFS path, then stat'ing the root-NS will look at that path.
    // Otherwise, we gin up fake data such that the root-dir appears to be
@@ -2841,7 +2840,6 @@ ssize_t marfs_write(const char*        path,
                     off_t              offset,
                     MarFS_FileHandle*  fh) {
    ENTRY();
-
    LOG(LOG_INFO, "%s\n", path);
    LOG(LOG_INFO, "offset: (%ld)+%ld, size: %ld\n", fh->open_offset, offset, size);
 
@@ -3030,7 +3028,6 @@ ssize_t marfs_write(const char*        path,
       // close the object
       LOG(LOG_INFO, "closing chunk: %ld\n", info->pre.chunk_no);
       TRY0( close_data(fh, 0, 0) );
-
       // MD file gets per-chunk information
       // pftool (OBJ_Nto1) will install chunkinfo directly.
       if (info->pre.obj_type != OBJ_Nto1) {
@@ -3072,7 +3069,6 @@ ssize_t marfs_write(const char*        path,
          //     chunks, within a given open(), so we preserve it.
          size_t   open_size  = get_stream_wr_open_size(fh, 1);
          uint16_t wr_timeout = info->pre.repo->write_timeout;
-
          TRY0( open_data(fh, OS_PUT, 0, open_size, 1, wr_timeout) );
       }
 
@@ -3280,5 +3276,71 @@ int marfs_lock(const char*        path,
 
 
 #endif
+
+int marfs_getTimingStats(ne_handle handle, int totalBlks, TimingStats* stats)
+{
+	int i;
+	for(i=0; i < totalBlks; i++)
+	{
+		//copy fields over
+		//stats[i].totalHandleTime = fast_timer_sec_v2(handle->handle_timer.accum);
+		//stats[i].totalErasureTime = fast_timer_sec_v2(handle->erasure_timer.accum);
+		memcpy((void*)stats[i].histo, (const void*)handle->stats[i].write_h.bin, sizeof(uint16_t)*65);
+	}
+	//show_handle_stats(handle);
+	//first we stop the timer for handler and erasure
+	//fast_timer_stop(&fh->mc_handle->handle_timer);
+	//fast_timer_stop(&fh->mc_handle->erasure_timer);
+	//timeStats->totalHandleTime = timeStats->totalHandleTime + fast_timer_sec(&fh->mc_handle->handle_timer);
+	//timeStats->totalErasureTime = timeStats->totalErasureTime + fast_timer_sec(&fh->mc_handle->erasure_timer);
+	//printf("marfs: totalhandle time %7.5f\n", timeStats->totalHandleTime);
+	//printf("marfs: totalerasure time %7.5f\n", timeStats->totalErasureTime);
+	//free(fh->mc_handle);
+	return 0;
+}
+
+unsigned int marfs_getNumPods()
+{
+	return 0;
+}
+/*
+   if (! handle->timing_flags)
+      printf("No stats\n");
+
+   else {
+      int simple = (handle->timing_flags & TF_SIMPLE);
+
+      fast_timer_show(&handle->handle_timer,  simple, "handle:  ");
+      fast_timer_show(&handle->erasure_timer, simple, "erasure: ");
+      printf("\n");
+
+      int i;
+      int N = handle->N;
+      int E = handle->E;
+      for (i=0; i<N+E; ++i) {
+         printf("-- block %d\n", i);
+
+         fast_timer_show(&handle->stats[i].thread, simple, "thread:  ");
+         fast_timer_show(&handle->stats[i].open,   simple, "open:    ");
+
+         fast_timer_show(&handle->stats[i].read,   simple, "read:    ");
+         log_histo_show(&handle->stats[i].read_h,  simple, "read_h:  ");
+
+         fast_timer_show(&handle->stats[i].write,  simple, "write:   ");
+         log_histo_show(&handle->stats[i].write_h, simple, "write_h: ");
+
+         fast_timer_show(&handle->stats[i].close,  simple, "close:   ");
+         fast_timer_show(&handle->stats[i].rename, simple, "rename:  ");
+         fast_timer_show(&handle->stats[i].stat,   simple, "stat:    ");
+         fast_timer_show(&handle->stats[i].xattr,  simple, "xattr:   ");
+
+         fast_timer_show(&handle->stats[i].crc,    simple, "CRC:     ");
+         log_histo_show(&handle->stats[i].crc_h,   simple, "CRC_h:   ");
+      }
+   }
+
+   return 0;
+*/
+
 
 
