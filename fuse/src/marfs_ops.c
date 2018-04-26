@@ -2997,7 +2997,6 @@ ssize_t marfs_write(const char*        path,
    const size_t recovery   = MARFS_REC_UNI_SIZE; // written in tail of object
    size_t       log_end    = (info->pre.chunk_no +1) * (info->pre.chunk_size - recovery);
    char*        buf_ptr    = (char*)buf;
-
    while (write_size && ((log_offset + write_size) >= log_end)) {
 
       // write <fill> more bytes, to fill this object
@@ -3016,7 +3015,6 @@ ssize_t marfs_write(const char*        path,
          errno = EIO;
          return -1;
       }
-
 
       TRY_GE0( DAL_OP(put, fh, buf_ptr, fill) );
       buf_ptr    += fill;
@@ -3081,8 +3079,9 @@ ssize_t marfs_write(const char*        path,
    // write more data into object. This amount doesn't finish out any
    // object, so don't write chunk-info to MD file.
    if (write_size)
+   {
       TRY_GE0( DAL_OP(put, fh, buf_ptr, write_size) );
-
+   }
 #if 0
    // EXPERIMENT for NFS
    //
@@ -3302,6 +3301,29 @@ int marfs_getTimingStats(ne_handle handle, int totalBlks, TimingStats* stats)
 unsigned int marfs_getNumPods()
 {
 	return 0;
+}
+
+int marfs_check_packable(const char* path, size_t content_length)
+{
+	int rc;
+	PathInfo info = {0};
+	EXPAND_PATH_INFO(&info, path);
+	printf("MARFS CHECK PACAKBLE DONE EXPAND PATH INFO\n");
+//	info.flags |= PI_STAT_QUERY;
+	init_pre(&info.pre, OBJ_FUSE, info.ns, info.ns->iwrite_repo, &info.st);
+	//stat_xattrs(&info, 0);
+//	info.flags &= ~PI_STAT_QUERY;
+	//save_xattrs(&info, XVT_PRE);
+	printf("MARFS DONE STAT XATTRS\n");
+	printf("content_length %ld; max pack file size %ld;\n", content_length, info.pre.repo->max_pack_file_size);
+
+	rc = 1; //init RC
+	if((content_length > info.pre.repo->max_pack_file_size) ||(content_length >= (info.pre.repo->chunk_size - MARFS_REC_UNI_SIZE)))
+	{
+		rc = 0;
+	}
+
+	return rc;
 }
 /*
    if (! handle->timing_flags)

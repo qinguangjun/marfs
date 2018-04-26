@@ -1920,6 +1920,7 @@ int close_data(MarFS_FileHandle* fh,
    else
       rc = DAL_OP(sync, fh);
 
+   printf("@#@@ completed DALOP sync\n");
    if (rc) {
       LOG(LOG_ERR, "%s failed\n", (abort ? "abort" : "sync"));
       retval = rc;
@@ -1929,6 +1930,7 @@ int close_data(MarFS_FileHandle* fh,
 
    // try the close
    rc = DAL_OP(close, fh);
+   printf("### COMPLETED CLOSE\n");
    if (rc) {
       LOG(LOG_ERR, "close failed\n");
       retval = rc;

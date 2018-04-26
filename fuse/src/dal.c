@@ -1272,6 +1272,7 @@ int mc_sync(DAL_Context* ctx) {
    // block is corrupt or missing.
    
    int error_pattern = ne_close(handle);
+   printf("### COMPLETED ne_CLOSE\n");
    if(error_pattern > 0) {
 
       // Keeping the log message as well as writing to the degraded
