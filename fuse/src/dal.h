@@ -121,7 +121,7 @@ OF SUCH DAMAGE.
 // <object-path-template>\t<n>\t<e>\t<start-block>\t<error-pattern>\t<repo-name>\t<pod>\t<capacity-unit>\t\n
 #  define MC_DEGRADED_LOG_FORMAT "%s\t%d\t%d\t%d\t%d\t%s\t%d\t%d\t\n"
 #  define MC_LOG_SCATTER_WIDTH   400
-
+#  define NUM_RULES 5 //OPEN, READ, WRITE, CLOSE
 #endif // USE_MC
 
 
@@ -132,7 +132,40 @@ OF SUCH DAMAGE.
 extern "C" {
 #endif
 
+#define MAX_RULES 4 //OPEN, RD, WR, CLOSE
 
+enum rule_type {
+    OPEN,
+    READ,
+    WRITE,
+    CLOSE
+};
+
+enum dal_type {
+    POSIX,
+    MC,
+    MC_SOCKETS,
+    OBJ,
+    NOP
+};
+
+typedef struct rule {
+    int type;
+    int mode;
+    unsigned int seed;
+    union {
+        double fail_freq;
+        unsigned int stall_time_sec;
+    }data;
+    int err;
+} Rule;
+
+/*
+typedef struct fuzzy_config {
+    DAL* wrap_dal;
+    Rule rules[MAX_RULES];
+} Fuzzy_Config;
+*/
 #if USE_MC
 
 // Need to export the mc_config struct here for the rebuild utility to
@@ -390,6 +423,10 @@ typedef struct DAL {
 
 } DAL;
 
+typedef struct fuzzy_config {
+        DAL* wrap_dal;
+        Rule rules[MAX_RULES];
+} Fuzzy_Config;
 
 // insert a new DAL, if there are no name-conflicts
 int  install_DAL(DAL* dal);
