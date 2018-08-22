@@ -1159,7 +1159,6 @@ static MarFS_Config_Ptr read_configuration_internal() {
     // install the options, parsed out above.
     // DAL is responsible for <opts> from now on
     if ((*dal_copy->config)(dal_copy, opts, opt_count)) {
-      printf("DAL_CONFIG failed for repo '%s'.\n", p_repo->name);
       LOG( LOG_ERR, "DAL_config failed for repo '%s'.\n",
            p_repo->name);
       return NULL;

@@ -53,9 +53,10 @@ int main(int argc, char* argv[])
 	char* path = NULL;
 	size_t chunk_no = 0;
 	path = argv[1];
-
+    MarFS_FileHandle fh;
 	char path_template[MC_MAX_PATH_LEN];
 	struct statvfs st;
+    char buf[8] = "1234";
 	//first need to read config
 	if (read_configuration())
 	{
@@ -68,8 +69,9 @@ int main(int argc, char* argv[])
 		printf("ERROR: init_xattr_specs failed\n");
 		return -1;
 	}
-
-	int rc = marfs_statvfs(marfs_sub_path(path), &st);
-	printf("done\n");
+    int fd = open("/campaign.leicao/rdma/test.txt", O_WRONLY);
+    int ret = write(fd, buf, 5);
+    ret = close(fd);
+    printf("done ret %d\n", ret);
 	return 0;
 }

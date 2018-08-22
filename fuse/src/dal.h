@@ -157,6 +157,7 @@ typedef struct rule {
         double fail_freq;
         unsigned int stall_time_sec;
     }data;
+    double stall_freq;
     int err;
 } Rule;
 
