@@ -152,21 +152,19 @@ enum dal_type {
 typedef struct rule {
     int type;
     int mode;
+    int pod;
+    int cap;
     unsigned int seed;
-    union {
-        double fail_freq;
-        unsigned int stall_time_sec;
-    }data;
+    double fail_freq;
+    unsigned int stall_time_sec;
     double stall_freq;
     int err;
 } Rule;
 
-/*
-typedef struct fuzzy_config {
-    DAL* wrap_dal;
-    Rule rules[MAX_RULES];
-} Fuzzy_Config;
-*/
+typedef struct dal_rules{
+    int num_rules;
+    Rule* rules;
+} Dal_Rules;
 #if USE_MC
 
 // Need to export the mc_config struct here for the rebuild utility to
@@ -228,6 +226,7 @@ typedef struct {
       uint32_t  u;
       int32_t   i;
    } data;
+
 } DAL_Context;
 
 
@@ -424,9 +423,11 @@ typedef struct DAL {
 
 } DAL;
 
+
 typedef struct fuzzy_config {
         DAL* wrap_dal;
-        Rule rules[MAX_RULES];
+        Dal_Rules dal_rules;
+        Udal_Rules udal_rules; //must be freed
 } Fuzzy_Config;
 
 // insert a new DAL, if there are no name-conflicts

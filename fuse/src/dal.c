@@ -629,553 +629,6 @@ DAL posix_dal = {
    .update_object_location = &generate_path
 };
 
-/*
-// ===================================================
-// FUZZY
-// ===================================================
-
-#define POSIX_DAL 0
-#define MC_DAL 1
-#define OBJ_DAL 2
-#define NOP_DAL 3
-#define OPEN_RULE 1
-#define READ_RULE 2
-#define WRITE_RULE 3
-#define CLOSE_RULE 4
-#define STALL 0
-#define FAIL 1
-
-
-#define FUZZY_CONFIG(CTX) FUZZY_CONTEXT(CTX)->config
-#define FUZZY_CONTEXT(CTX) ((Fuzzy_Context*)((CTX)->data.ptr))
-
-//fuzzy_context definition
-typedef struct fuzzy_context {
-        DAL_Context*        wrap_context;
-        unsigned int        ops_seeds[MAX_RULES];
-        Fuzzy_Config*       config;
-} Fuzzy_Context;
-
-
-//helper function to get the 
-//index of '=' char in a string token
-int get_equal(const char* token) {
-    int i;
-    int ret = -1;
-    int len = strlen(token);
-    
-    for(i = 0; i < len; i++) {
-        if (token[i] == '=') {
-            ret = i;
-            break;
-        }
-    }
-
-    return ret;
-}
-
-//helper funciton to parse a rule for an opt
-int parse_rule(const char* rule, Fuzzy_Config* config) {
-    char* string, *token; //string must be freed
-    int which_rule = -1;
-    int mode = -1;
-    int pos;
-    int err = 0;
-    int ret = 0;
-    double fail_freq = 0;
-    unsigned int stall_time_sec = 0;
-    unsigned int seed = 0;
-
-    string = strdup(rule);
-    while ((token = strsep(&string, ",")) != NULL) {
-        pos = get_equal(token);
-        //check if format is valid
-        if (pos < 0) {
-            ret = -1;
-            LOG(LOG_ERR, "Invalid fuzzy description format\n");
-            break;
-        }
-        //now parse 
-        if (token[0] == 'f') {
-            //this is a function
-            if (token[pos+1] == 'o') {
-                which_rule = OPEN_RULE;
-            }
-            else if (token[pos+1] == 'r') {
-                which_rule = READ_RULE;
-            }
-            else if (token[pos+1] == 'w') {
-                which_rule = WRITE_RULE;
-            }
-            else if (token[pos+1] == 'c') {
-                which_rule = CLOSE_RULE;
-            }
-            else {
-                ret = -1;
-                LOG(LOG_ERR, "Unrecognized function in rule\n");
-                break;
-            }
-        }
-        else if (token[0] == 'm') {
-            //this is a mode, either fail or stall
-            if (token[pos+1] == 'f') {
-                //this is fail
-                mode = FAIL;
-            }
-            else if (token[pos+1] == 's') {
-                //this is stall
-                mode = STALL;
-            }
-            else {
-                ret = -1;
-                LOG(LOG_ERR, "Unrecognized option in rule\n");
-                break;
-            }
-        }
-        else if (token[0] == 't') {
-            //parse time/frequency
-            fail_freq  = atof(&token[pos+1]);
-            stall_time_sec = stroul(&token[pos+1], NULL, 10);
-        }
-        else if (token[0] == 'r') {
-            //parse return code
-            err = -(atoi(&token[pos+1]));
-        }
-        else if (token[0] == 's') {
-            //parse seed
-            seed = (unsigned int)stroul(&token[pos+1], NULL, 10);
-        }
-    }
-
-    config->rules[which_rule - 1].type = which_rule;
-    config->rules[which_rule - 1].mode = mode;
-    if (mode == FAIL) {
-        if (fail_freq <= 0) {
-            LOG(LOG_ERR, "Fail frequency must be greater than 0\n");
-            ret = -1;
-        }
-        config->rules[which_rule - 1].data.fail_freq = fail_freq;
-    }
-    else if (mode == STALL) {
-        if (!stall_time_sec) {
-            LOG(LOG_ERR, "Stall time must be greater than 0\n");
-            ret = -1;
-        }
-        config->rules[which_rule - 1].data.stall_time_sec = (unsigned int)stall_time_sec;
-    }
-    config->rules[which_rule - 1].err = err;
-    config->rules[which_rule - 1].seed = seed;
-    return ret;
-}
-
-//wrap the default dal
-int wrap_default(struct DAL* dal, Fuzzy_Config* config, xDALConfigOpt** opts, size_t opt_count) {
-    //we start by parsing rules
-    int i;
-    int ret = 0;
-    for (i = 0; i < opt_count; i++) {
-        if (!strcmp(opts[i]->key, "rule")) {
-            ret = parse_rule(opts[i]->val.value.str, config);
-        }
-    }
-
-    return ret;
-}
-
-int wrap_mc(struct DAL* dal, Fuzzy_Config* config, int is_sockets, xDALConfigOpt** opts, size_t opt_count) {
-    int i;
-    MC_Config* mc_config = malloc(sizeof(MC_Config));
-    memset(mc_config, 0, sizeof(MC_Config));
-
-    mc_config->degraded_log_fd = -1;
-    mc_config->degraded_log_path = NULL;
-    char* mc_user = NULL;
-
-    for(i = 0; i < opt_count; i++) {
-        if (!strcmp(opts[i]->key, "rule")) {
-            if (!parse_rule(opts[i]->val.value.str, config)) {
-                LOG(LOG_ERR, "Failed to parse rule %s\n", opts[i]->val.value.str);
-                return -1;
-            }
-        }
-        //the rest is simliar to mc_config
-        else if (!strcmp(opts[i]->key, "n")) {
-            mc_config->n = strtol(opts[i]->val.value.str, NULL, 10);
-            LOG(LOG_INFO, "parsing mc option \"n\" = %d\n", mc_config->n);
-        }
-        else if (!strcmp(opts[i]->key, "e")) {
-            mc_config->e = strtol(opts[i]->val.value.str, NULL, 10);
-            LOG(LOG_INFO, "parsing mc option \"e\" = %d\n", mc_config->e);
-        }
-        else if (!strcmp(opts[i]->key, "num_pods")) {
-            mc_config->num_pods = strtol(opts[i]->val.value.str, NULL, 10);
-            LOG(LOG_INFO, "parsing mc option \"num_pods\" = %d\n", mc_config->num_pods);
-        }
-        else if (!strcmp(opts[i]->key, "num_cap")) {
-            mc_config->num_cap = strtol(opts[i]->val.value.str, NULL, 10);
-            LOG(LOG_INFO, "parsing mc option \"num_cap\" = %d\n", mc_config->num_cap);
-        }
-        else if (!strcmp(opts[i]->key, "scatter_width")) {
-            mc_config->scatter_width = strtol(opts[i]->val.value.str, NULL, 10);
-            LOG(LOG_INFO, "parsing mc option \"scatter_width\" = %d\n", mc_config->scatter_width);
-        }
-        else if (!strcmp(opts[i]->key, "degraded_log_dir")) {
-            mc_config->degraded_log_path = strdup(opts[i]->val.value.str);
-            LOG(LOG_INFO, "parsing mc option \"degraded_log_path\" = %s\n", mc_config->degraded_log_path);
-        }
-        else if (!strcmp(opts[i]->key, "host_offset")) {
-            mc_config->host_offset = strtol(opts[i]->val.value.str, NULL, 10);
-            LOG(LOG_INFO, "parsing mc option \"host_offset\" = %d\n", mc_config->host_offset);
-        }
-        else if (!strcmp(opts[i]->key, "host_count")) {
-            mc_config->host_count = strtol(opts[i]->val.value.str, NULL, 10);
-            LOG(LOG_INFO, "parsing mc option \"host_count\" = %d\n", mc_config->host_count);
-        }
-        else if (!strcmp(opts[i]->key, "blocks_per_host")) {
-            mc_config->blocks_per_host = strtol(opts[i]->val.value.str, NULL, 10);
-            LOG(LOG_INFO, "parsing mc option \"blocks_per_host\" = %d\n", mc_config->blocks_per_host);
-        }
-        else if (!strcmp(opts[i]->key, "block_offset")) {
-            mc_config->block_offset = strtol(opts[i]->val.value.str, NULL, 10);
-            LOG(LOG_INFO, "parsing mc option \"block_offset\" = %d\n", mc_config->block_offset);
-        }
-        else if (!strcmp(opts[i]->key, "global_block_numbering")) {
-            mc_config->global_block_numbering = strtol(opts[i]->val.value.str, NULL, 10);
-            LOG(LOG_INFO, "parsing mc option \"global_block_numbering\" = %d\n", mc_config->global_block_numbering);
-        }
-        else if (!strcmp(opts[i]->key, "pod_offset")) {
-            mc_config->pod_offset = strtol(opts[i]->val.value.str, NULL, 10);
-            LOG(LOG_INFO, "parsing mc option \"pod_offset\" = %d\n", mc_config->pod_offset);
-        }
-        else if (!strcmp(opts[i]->key, "mc_user")) {
-            mc_user = strdup(opts[i]->val.value.str);
-            LOG(LOG_INFO, "parsing mc option \"mc_user\" = %s\n", mc_user);
-        }
-        else {
-            LOG(LOG_ERR, "Unrecognized MC DAL (sockets) config option: %s\n", opts[i]->key);
-            free(mc_config);
-            return -1;
-        }
-    }
-
-    if (mc_config->degraded_log_path == NULL) {
-        LOG(LOG_ERR, "no degraded_log_dir specified for wrap DAL '%s' in fuzzy dal wrap.\n", config->wrap_dal->name);
-        return -1;
-    }
-    else {
-        SEM_INIT(&mc_config->lock, 0, 1);
-    }
-#ifdef S3_AUTH
-
-    if (is_sockets) {
-
-        if (!mc_user)
-            mc_user = strdup(DEFAULT_SKT_AUTH_USER);
-
-        int err = 0;
-        if (sku_auth_init(mc_user, &mc_config->auth)) {
-            LOG(LOG_ERR, "Authentication-init failed for user '%s' in sockets-DAL '%s'.\n", mc_user, config->wrap_dal->name);
-            err = 1;
-        }
-        else if (mc_config->auth == NULL) {
-            LOG(LOG_ERR, "libne was built without enabling socket-authentication, "" but DAL '%s' requires it.\n", config->wrap_dal->name);
-            err = 1;
-        }
-
-        free(mc_user);
-        if (err)
-            return -1;
-    }
-#endif
-
-    mc_config->is_sockets = is_sockets;
-    if (is_sockets)
-        mc_config->snprintf = mc_path_snprintf_sockets;
-    else
-        mc_config->snprintf = ne_default_snprintf;
-
-    free_xdal_config_options(opts);
-
-    config->wrap_dal->global-state = mc_config;
-    EXIT();
-    return 0;
-}
-
-int fuzzy_config(struct DAL*     dal,
-              xDALConfigOpt** opts,
-              size_t          opt_count) {
-
-    ENTRY();
-
-    Fuzzy_Config* config = (fuzzy_config*) malloc(sizeof(fuzzy_config));
-    memset(config, 0, sizeof(fuzzy_config));
-
-    enum dal_type wrap_dal;
-    int ret = 0;
-    int i;
-    for (i = 0; i < opt_count; i++) {
-        if (!strcmp(opts[i]->key, "wrap")) {
-            //get the wrapped dal
-            config->wrap_dal = get_DAL(opts[i]->val.value.str);
-            if (!strcmp(opts[i]->val.value.str, "POSIX")) {
-                ret = wrap_default(dal, config, opts, opt_count);
-            }
-            else if (!strcmp(opts[i]->val.value.str, "NO_OP")) {
-                ret = wrap_default(dal, config, opts, opt_count);
-            }
-            else if (!strcmp(opts[i]->val.value.str, "OBJ")) {
-                ret = wrap_default(dal, config, opts, opt_count);
-            }
-            else if (!strcmp(opts[i]->val.value.str, "MC")) {
-                ret = wrap_mc(dal, config, 0, opts, opt_count);
-            }
-            else if (!strcmp(opts[i]->val.value.str, "MC_SOCKETS")) {
-                ret = wrap_mc(dal, config, 1, opts, opt_count);
-            }
-            else {
-                LOG(LOG_ERR, "Unspecified dal to wrap\n");
-                ret =  -1;
-                break;
-            }
-            break;
-        }
-    }
-
-    dal->global-state = config;
-    EXIT();
-    return ret;
-}
-
-int fuzzy_init(DAL_Context* ctx, DAL* dal, void* fh) {
-    ENTRY();
-    int i;
-
-    ctx->data.ptr = malloc(sizeof(Fuzzy_Context));
-    if (! FUZZY_CONTEXT(ctx)) {
-        LOG(LOG_ERR, "failed to allocate memory for Fuzzy_Context\n");
-        return -1;
-    }
-    memset(FUZZY_CONTEXT(ctx), 0, sizeof(Fuzzy_Context));
-    
-    FUZZY_CONTEXT(ctx) = malloc(sizeof(DAL_Context));
-    if (! FUZZY_CONTEXT(ctx)->wrap_context) {
-        LOG(LOG_ERR, "failed to allocate memory for wrap dal context\n");
-        return -1;
-    }
-    memset(FUZZY_CONTEXT(ctx), 0, sizeof(DAL_Context));
-
-    //call init in wrapped dal
-    FUZZY_CONFIG(ctx) = (Fuzzy_Config*)dal->global_state;   
-
-    if (FUZZY_CONFIG(ctx)->wrap_dal->init(FUZZY_CONTEXT(ctx)->wrap_context, FUZZY_CONFIG(ctx)->wrap_dal, fh)) {
-        LOG(LOG_ERR, "Fuzzy init failed to init wrapped dal\n");
-        return -1;
-    }
-
-    //copy config seeds into context so each context has its own seeds
-    for (i = 0; i < MAX_RULE; i++) {
-        FUZZY_CONTEXT(ctx)->ops_seeds[i] = FUZZY_CONFIG(ctx)->ruls[i];
-    }
-
-    EXIT();
-    return 0;
-}
-
-int fuzzy_destroy(DAL_Context* ctx, struct DAL* dal) {
-    free(FUZZY_CONTEXT(ctx)->wrap_context);
-    free(FUZZY_CONTEXT(ctx));
-    return 0;
-}
-
-int fuzzy_open( DAL_Context* ctx,
-                int is_put,
-                size_t chunk_offset,
-                size_t content_length,
-                uint8_t preserve_write_count,
-                uint16_t timeout) {
-    ENTRY();
-    int ret = 0;
-    Rule open_rule = FUZZY_CONFIG(ctx)->rules[OPEN_RULE - 1];
-
-    //first check if there is a rule for open
-    if (open_rule.type == OPEN_RULE) {
-        //we have a rule!
-        if (open_rule.mode == FAIL) {
-            //this is a fail rule, roll dice
-            double roll = rand_r(&(FUZZY_CONTEXT(ctx)->ops_seeds[OPEN_RULE-1])) % 101;   
-            if (roll <= (open_rule.data.fail_freq * 100)) {
-                //fail open
-                ret = open_rule.err;
-            }
-            else {
-                //we call open 
-                ret = FUZZY_CONFIG(ctx)->wrap_dal->open(FUZZY_CONTEXT(ctx)->wrap_context,
-                                                            is_put,
-                                                            chunk_offset,
-                                                            content_length,
-                                                            preserve_write_count,
-                                                            timtout);
-            }
-
-        }
-        else if (open_rule.mode == STALL) {
-            //sleep
-            sleep(open_rule.data.stall_time_sec);
-            ret = FUZZY_CONFIG(ctx)->wrap_dal->open(FUZZY_CONTEXT(ctx)->wrap_context,
-                                                        is_put,
-                                                        chunk_offset,
-                                                        content_length,
-                                                        preserve_write_count,
-                                                        timeout);
-        }
-    }
-    else {
-        //no rule for open
-        ret = FUZZY_CONFIG(ctx)->wrap_dal->open(FUZZY_CONTEXT(ctx)->wrap_context,
-                                                is_put,
-                                                chunk_offset,
-                                                content_length,
-                                                preserve_write_count,
-                                                timeout);
-    }
-
-    EXIT();
-    return ret;
-}
-
-//this is the write
-int fuzzy_put(DAL_Context* ctx, const char* buf, size_t size){
-    ENTRY();
-    int ret = 0;
-    Rule write_rule = FUZZY_CONFIG(ctx)->rules[WRITE_RULE-1];
-
-    if (write_rule.type == WRITE_RULE) {
-        if (write_rule.mode == FAIL) {
-            double roll = rand_r(&(FUZZY_CONTEXT(ctx)->ops_seeds[WRITE_RULE-1])) % 101;
-            if (roll <= (write_rule.data.fail_freq) * 100) {
-                //fail write
-                ret = write_rule.err;
-            }
-            else {
-                //write proceeds
-                ret = FUZZY_CONFIG(ctx)->wrap_dal->put(FUZZY_CONTEXT(ctx)->wrap_context,
-                                                        buf,
-                                                        size);
-            }
-        }
-        else if (write_rule.mode == STALL) {
-            //sleep write
-            sleep(write_rule.data.stall_time_sec);
-            ret = FUZZY_CONFIG(ctx)->wrap_dal->put(FUZZY_CONTEXT(ctx)->wrap_context,
-                                                    buf,
-                                                    size);
-        }
-    }
-    else {
-        ret = FUZZY_CONFIG(ctx)->wrap_dal->put(FUZZY_CONTEXT(ctx)->wrap_context,
-                                                buf,
-                                                size);
-    }
-
-    EXIT();
-    return ret;
-}
-
-//read
-int fuzzy_get(DAL_Context* ctx, char* buf, size_t size) {
-    ENTRY();
-    int ret = 0;
-    Rule read_rule = FUZZY_CONFIG(ctx)->rules[READ_RULE-1];
-
-    if (read_rule.type == READ_RULE) {
-        if (read_rule.mode == FAIL) {
-            double roll = rand_r(&(FUZZY_CONTEXT(ctx)->ops_seeds[READ_RULE-1])) % 101;
-            if (roll <= (read_rule.data.fail_freq * 100)) {
-                //fail read
-                ret = read_rule.err;
-            }
-            else {
-                //sleep read
-                sleep(read_rule.data.stall_time_sec);
-                ret = FUZZY_CONFIG(ctx)->wrap_dal->get(FUZZY_CONTEXT(ctx)->wrap_context,
-                                                        buf,
-                                                        size);
-            }
-        }
-    }
-    else {
-        ret = FUZZY_CONFIG(ctx)->wrap_dal->get(FUZZY_CONTEXT(ctx)->wrap_context,
-                                                buf,
-                                                size);
-    }
-
-    EXIT();
-    return ret;
-}
-
-int fuzzy_close(DAL_Context* ctx) {
-    ENTRY();
-
-    int ret = 0;
-    Rule close_rule = FUZZY_CONFIG(ctx)->rules[CLOSE_RULE-1];
-
-    if (close_rule.type == CLOSE_RULE) {
-        if (close_rule.mode == FAIL) {
-            double roll = rand_r(&(FUZZY_CONTEXT(ctx)->ops_seeds[CLOSE_RULE-1])) % 101;
-            if (roll <= (close_rule.data.fail_freq * 100)) {
-                //fail close
-                ret = close_rule.err;
-            }
-            else {
-                //stall close
-                sleep(close_rule.data.stall_time_sec);
-                ret = FUZZY_CONFIG(ctx)->wrap_dal->close(FUZZY_CONTEXT(ctx)->wrap_context);
-            }
-        }
-    }
-    else {
-        ret = FUZZY_CONFIG(ctx)->wrap_dal->close(FUZZY_CONTEXT(ctx)->wrap_context);
-    }
-
-    EXIT();
-    return ret;
-}
-
-int fuzzy_sync(DAL_Context* ctx) {
-    ENTRY();
-    int ret = FUZZY_CONFIG(ctx)->wrap_dal->sync(FUZZY_CONTEXT(ctx)->wrap_context);
-    EXIT();
-    return ret;
-}
-
-int fuzzy_abort(DAL_Context* ctx) {
-    ENTRY();
-    int ret = FUZZY_CONFIG(ctx)->wrap_dal->abort(FUZZY_CONTEXT(ctx)->wrap_context);
-}
-
-
-DAL fuzzy_dal = {
-    .name           = "FUZZY",
-    .name_len       = 5,
-
-    .global_state   = NULL,
-
-    .config         = &fuzzy_config,
-    .init           = &fuzzy_init,
-    .destroy        = &fuzzy_destroy,
-
-    .open           = &fuzzy_open,
-    .put            = &fuzzy_put,
-    .get            = &fuzzy_dal,
-    .sync           = &fuzzy_sync,
-    .abort          = &fuzzy_abort,
-    .close          = &fuzzy_close,
-
-    .update_object_location = &fuzzy_update_path
-};
-*/
-
-
 
 #if USE_MC
 // ===========================================================================
@@ -1203,6 +656,7 @@ typedef struct mc_context {
    unsigned int      pod;
    unsigned int      cap;
    MC_Config         *config;
+   Udal_Rules*       udal_rules;
 } MC_Context;
 
 
@@ -1556,15 +1010,12 @@ int mc_path_snprintf_sockets(char*       dest,
                   block_offset);             // "block%d"
 }
 
-
-
 // For MC DALs, the MarFS configuration specifies a sprintf-format
 // representing a generic path.  This function fills out some of those
 // fields, leaving a template that still has 1 or more "%d" fileds,
 // which vary across the block-elements in a stripe.  libne will then
 // call a custom function to fill out the remaining fields, to
 // generate each per-block filename, as needed.
-//
 int mc_update_path(DAL_Context* ctx) {
    // QUESTION: Do we need to prepend the bucket and ns->alias to the
    //           objid? For now We can just flatten the url to make
@@ -1716,9 +1167,14 @@ int mc_open(DAL_Context* ctx,
    	//memset(MC_FH(ctx)->timing_stats, 0, sizeof(double) * 65 * (MC_FH(ctx)->tot_stats) + 2 * (MC_FH(ctx)->tot_stats));
    }
    MC_HANDLE(ctx) = ne_open1(MC_CONFIG(ctx)->snprintf, ctx,
-                             impl, MC_CONFIG(ctx)->auth, timing_flags,
+                             impl, MC_CONTEXT(ctx)->udal_rules, MC_CONFIG(ctx)->auth, timing_flags,
                              path_template, mode,
                              MC_CONTEXT(ctx)->start_block, n, e);
+
+   if(! MC_HANDLE(ctx)) {
+             LOG(LOG_ERR, "Failed to open MC Handle %s\n", path_template);
+                   return -1;
+   }
    //we need total_blk from ne_handle to allocate stat buffer
    MC_FH(ctx)->total_blk = MC_HANDLE(ctx)->N + MC_HANDLE(ctx)->E;
    MC_FH(ctx)->pod_id = MC_CONTEXT(ctx)->pod;
@@ -1733,10 +1189,6 @@ int mc_open(DAL_Context* ctx,
 	
    }
    MC_HANDLE(ctx)->timing_stats = MC_FH(ctx)->timing_stats;
-   if(! MC_HANDLE(ctx)) {
-      LOG(LOG_ERR, "Failed to open MC Handle %s\n", path_template);
-      return -1;
-   }
 
    if(is_put) {
       os->flags |= OSF_WRITING;
@@ -1764,7 +1216,6 @@ int mc_put(DAL_Context* ctx,
    ENTRY();
 
    ObjectStream* os     = MC_OS(ctx);
-
    if(! (os->flags & OSF_OPEN)) {
       LOG(LOG_ERR, "Attempted put on OS that is not open.\n");
       errno = EBADF;
@@ -1781,6 +1232,7 @@ int mc_put(DAL_Context* ctx,
    }
 
    ne_handle handle = MC_HANDLE(ctx);
+   printf("mc_put calling ne_write\n");
    int written = ne_write(handle, buf, size);
 
    if(written < 0) {
@@ -2016,12 +1468,12 @@ DAL mc_sockets_dal = {
 #define MC_DAL 1
 #define OBJ_DAL 2
 #define NOP_DAL 3
-#define OPEN_RULE 1
-#define READ_RULE 2
-#define WRITE_RULE 3
-#define CLOSE_RULE 4
-#define STALL 1
-#define FAIL 2
+//#define OPEN_RULE 1
+//#define READ_RULE 2
+//#define WRITE_RULE 3
+//#define CLOSE_RULE 4
+//#define STALL 1
+//#define FAIL 2
 
 
 #define FUZZY_CONFIG(CTX) FUZZY_CONTEXT(CTX)->config
@@ -2030,32 +1482,77 @@ DAL mc_sockets_dal = {
 //fuzzy_context definition
 typedef struct fuzzy_context {
         DAL_Context*        wrap_context;
-        unsigned int        ops_seeds[MAX_RULES];
         Fuzzy_Config*       config;
 } Fuzzy_Context;
 
 
-//helper function to get the 
-//index of '=' char in a string token
-int get_equal(const char* token) {
-    int i;
-    int ret = -1;
-    int len = strlen(token);
+int check_match(Server_Rule* rule, int func, int pod, int cap, int blk){
+    int match = 0;
+    //make sure this is the same function, if not we can just return now
+    if (func != rule->rule_type){
+        return 0;
+    }
+
+    //if rule->xxx == -1, that means this rule applies for all xxx 
+    match += (pod == rule->pod) || (rule->pod == -1);
+    match += (cap == rule->cap) || (rule->cap == -1);
+    match += (blk == rule->blk) || (rule->blk == -1);
+
+    //all criteria match, we return ture
+    if (match == 3) {
+        return 1;
+    }
+    else {
+        return 0;
+    }
+}
+
+//find udal rule that matches with function type, pod, cap, blk.
+//if match, we return the index of the rule 
+int fuzzy_check_udal_rule(int func, void* state, int blk) {
+    //now we can assume only mc/mc_sockets use this 
+
+    DAL_Context * ctx = (DAL_Context*) state;
+    MC_Config* config = MC_CONFIG(ctx);
+    /*
+    uint32_t hosts_per_pod = config->host_count / config->num_pods;
+    uint32_t pod_offset    = MC_CONTEXT(ctx)->pod * hosts_per_pod;
+    uint32_t host_offset   = config->host_offset + (blk / config->blocks_per_host);
+    uint32_t block_offset  = blk + config->block_offset;
     
-    for(i = 0; i < len; i++) {
-        if (token[i] == '=') {
-            ret = i;
-            break;
+    //convert to absolute pod and blk, we assume that 
+    //pod, cap, blk in the MARFSCONFIGRC are also absolute 
+    int pod = (int)(pod_offset + host_offset);
+    int cap = MC_CONTEXT(ctx)->cap;
+    int blk_real = (int)(block_offset + config->block_offset);*/
+
+    /*
+    * NOTE: FOR NOW WE USE LOGICAL POD AND BLK
+    */
+
+    Udal_Rules* udal_rules = MC_CONTEXT(ctx)->udal_rules;
+    int num_rules = udal_rules->num_rules;
+    int i;
+
+    for(i = 0; i < num_rules; i++) {
+        if (check_match(&(udal_rules->rules[i]), func, MC_CONTEXT(ctx)->pod, MC_CONTEXT(ctx)->cap, blk)) {
+            //we have to fire up this rule
+            return i;
         }
     }
 
-    return ret;
+    return -1;
+
+    //now go over rules to check for matching pod/
 }
 
+#define DAL_RULE 0
+#define UDAL_RULE 1
+
 //helper funciton to parse a rule for an opt
-int parse_rule(const char* rule, Fuzzy_Config* config) {
+int parse_rule(const char* rule, Fuzzy_Config* config, int dal_rule_cursor, int udal_rule_cursor) {
     char* string, *token; //string must be freed
-    int which_rule = -1;
+    int which_func = -1;
     int mode = -1;
     int pos;
     int err = 0;
@@ -2065,81 +1562,105 @@ int parse_rule(const char* rule, Fuzzy_Config* config) {
     unsigned int seed = 0;
     double stall_freq = 0;
 
-    string = strdup(rule);
+    int pod = -1;
+    int cap = -1;
+    int blk = -1;
+
+    int which_type = -1;
+    
+    string = strdup(rule); 
+    printf("parsing_rule: parsing rule %s\n", string);
     while ((token = strsep(&string, ",")) != NULL) {
-        pos = get_equal(token);
-        //check if format is valid
-        if (pos < 0) {
-            ret = -1;
-            LOG(LOG_ERR, "Invalid fuzzy description format\n");
-            break;
-        }
-        
-        //now parse 
-        if (!strncmp(token, "func", 4)) {
-            //this is a function
-            if (token[pos+1] == 'o') {
-                which_rule = OPEN_RULE;
+        if (!strncmp(token, "which", 5)) {
+            //still got to check if this is udal or dal....
+            if (token[6] == 'd') {
+                which_type = DAL_RULE;
+                ret = 0;
             }
-            else if (token[pos+1] == 'r') {
-                which_rule = READ_RULE;
-            }
-            else if (token[pos+1] == 'w') {
-                which_rule = WRITE_RULE;
-            }
-            else if (token[pos+1] == 'c') {
-                which_rule = CLOSE_RULE;
+            else if (token[6] == 'u') {
+                which_type = UDAL_RULE;
+                ret = 1;
             }
             else {
-                ret = -1;
-                LOG(LOG_ERR, "Unrecognized function in rule\n");
-                break;
+                printf("Ungrecodnized dal/udal type in rule token %s\n", token); //debug purpose
+                LOG(LOG_ERR, "Ungrecodnized dal/udal type in rule token %s\n", token);
+                free(string);
+                return -1;
+            }
+        }
+        else if (!strncmp(token, "pod", 3)) {
+            pod = atoi(&token[4]);
+        }
+        else if (!strncmp(token, "cap", 3)) {
+            cap = atoi(&token[4]);
+        }
+        else if (!strncmp(token, "blk", 3)) {
+            blk = atoi(&token[4]);
+        }
+        else if (!strncmp(token, "func", 4)) {
+            //this is a function
+            if (token[5] == 'o') {
+                which_func = OPEN_RULE;
+            }
+            else if (token[5] == 'r') {
+                which_func = READ_RULE;
+            }
+            else if (token[5] == 'w') {
+                which_func = WRITE_RULE;
+            }
+            else if (token[5] == 'c') {
+                which_func = CLOSE_RULE;
+            }
+            else {
+                printf("Unrecognized function in rule token %s\n", token);
+                LOG(LOG_ERR, "Unrecognized function in rule token %s\n", token);
+                free(string);
+                return -1;
             }
         }
         else if (!strncmp(token, "mode", 4)) {
             //this is a mode, either fail or stall
-            if (token[pos+1] == 'f') {
+            if (token[5] == 'f') {
                 //this is fail
                 mode = FAIL;
             }
-            else if (token[pos+1] == 's') {
+            else if (token[5] == 's') {
                 //this is stall
                 mode = STALL;
             }
             else {
-                ret = -1;
-                LOG(LOG_ERR, "Unrecognized option in rule\n");
-                break;
+                printf("Unrecognized mode in rule token %s\n", token);
+                LOG(LOG_ERR, "Unrecognized mode in rule token %s\n", token);
+                free(string);
+                return -1;
             }
         }
         else if (!strncmp(token, "fail_freq", 9)) {
             //parse time/frequency
-            fail_freq  = atof(&token[pos+1]);
+            fail_freq  = atof(&token[10]);
         }
         else if (!strncmp(token, "stall_time", 10)) {
-            stall_time_sec = (unsigned int)strtoul(&token[pos+1], NULL, 10);
+            stall_time_sec = (unsigned int)strtoul(&token[11], NULL, 10);
         }
         else if (!strncmp(token, "stall_freq", 10)) {
-            stall_freq = atof(&token[pos+1]);
+            stall_freq = atof(&token[11]);
         }
         else if (!strncmp(token, "ret", 3)) {
             //parse return code
-            err = atoi(&token[pos+1]);
+            err = atoi(&token[4]);
         }
         else if (!strncmp(token, "seed", 4)) {
             //parse seed
-            seed = (unsigned int)strtoul(&token[pos+1], NULL, 10);
+            seed = (unsigned int)strtoul(&token[5], NULL, 10);
         }
     }
 
-    config->rules[which_rule - 1].type = which_rule;
-    config->rules[which_rule - 1].mode = mode;
+    //now check some values
     if (mode == FAIL) {
-        if (fail_freq <= 0) {
+        if (fail_freq < 0) {
             LOG(LOG_ERR, "Fail frequency must be greater than 0\n");
             ret = -1;
         }
-        config->rules[which_rule - 1].data.fail_freq = fail_freq;
     }
     else if (mode == STALL) {
         if (!stall_time_sec) {
@@ -2150,12 +1671,35 @@ int parse_rule(const char* rule, Fuzzy_Config* config) {
             LOG(LOG_ERR, "Stall frequency must be greater than or equal to 0\n");
             ret = -1;
         }
-        config->rules[which_rule - 1].data.stall_time_sec = stall_time_sec;
-        config->rules[which_rule - 1].stall_freq = stall_freq;
     }
-    config->rules[which_rule - 1].err = err;
-    config->rules[which_rule - 1].seed = seed;
 
+    //assign values based on which dal
+    if (which_type == DAL_RULE) {
+        config->dal_rules.rules[dal_rule_cursor].type = which_func;
+        config->dal_rules.rules[dal_rule_cursor].mode = mode;
+        config->dal_rules.rules[dal_rule_cursor].stall_time_sec = stall_time_sec;
+        config->dal_rules.rules[dal_rule_cursor].stall_freq = stall_freq;
+        config->dal_rules.rules[dal_rule_cursor].fail_freq = fail_freq;
+        config->dal_rules.rules[dal_rule_cursor].err = err;
+        config->dal_rules.rules[dal_rule_cursor].seed = seed;
+        config->dal_rules.rules[dal_rule_cursor].pod = pod;
+        config->dal_rules.rules[dal_rule_cursor].cap = cap;
+        printf("Parsed dal rule: func %d mode %d fail_freq %f stall_freq %f stall_time %d err %d seed %d pod %d cap %d\n",
+                                which_func, mode, fail_freq, stall_freq, stall_time_sec, err,config->dal_rules.rules[dal_rule_cursor].seed, pod, cap);
+    }
+    else if (which_type == UDAL_RULE) {
+        config->udal_rules.rules[udal_rule_cursor].rule_type = which_func;
+        config->udal_rules.rules[udal_rule_cursor].mode = mode;
+        config->udal_rules.rules[udal_rule_cursor].stall_time_sec = stall_time_sec;
+        config->udal_rules.rules[udal_rule_cursor].stall_freq = stall_freq;
+        config->udal_rules.rules[udal_rule_cursor].fail_freq = fail_freq;
+        config->udal_rules.rules[udal_rule_cursor].err = err;
+        config->udal_rules.rules[udal_rule_cursor].seed = seed;
+        config->udal_rules.rules[udal_rule_cursor].pod = pod;
+        config->udal_rules.rules[udal_rule_cursor].cap = cap;
+        config->udal_rules.rules[udal_rule_cursor].blk = blk;
+    }
+    free(string);
     return ret;
 }
 
@@ -2164,12 +1708,18 @@ int wrap_default(struct DAL* dal, Fuzzy_Config* config, xDALConfigOpt** opts, si
     //we start by parsing rules
     int i;
     int ret = 0;
+
+    int cursors[2];
+    memset(cursors, 0, sizeof(int) * 2);
+
     for (i = 0; i < opt_count; i++) {
         if (!strcmp(opts[i]->key, "rule")) {
-            if (parse_rule(opts[i]->val.value.str, config)) {
+            ret = parse_rule(opts[i]->val.value.str, config, cursors[0], cursors[1]);
+            if (ret == -1) {
                 LOG(LOG_ERR, "Failed to parse rule %s\n", opts[i].val.value.str);
                 return -1;
             }
+            cursors[ret]++;
         }
     }
 
@@ -2184,13 +1734,17 @@ int wrap_mc(struct DAL* dal, Fuzzy_Config* config, int is_sockets, xDALConfigOpt
     mc_config->degraded_log_fd = -1;
     mc_config->degraded_log_path = NULL;
     char* mc_user = NULL;
+    int cursors[2]; //cursors[0] for dal; cursors[1] for udal
+    memset(cursors, 0, sizeof(int) * 2);
 
     for(i = 0; i < opt_count; i++) {
         if (!strcmp(opts[i]->key, "rule")) {
-            if (parse_rule(opts[i]->val.value.str, config)) {
+            int ret = parse_rule(opts[i]->val.value.str, config, cursors[0], cursors[1]);
+            if (ret == -1) {
                 LOG(LOG_ERR, "Failed to parse rule %s\n", opts[i]->val.value.str);
                 return -1;
             }
+            cursors[ret] ++;
         }
         else if (!strcmp(opts[i]->key, "wrap")) {
             ;
@@ -2298,6 +1852,34 @@ int wrap_mc(struct DAL* dal, Fuzzy_Config* config, int is_sockets, xDALConfigOpt
     return 0;
 }
 
+//helper functions to find number of dal rules and number of udal rules
+void get_num_dal_udal_rules(xDALConfigOpt** opts, 
+                           size_t opt_count, 
+                           int* num_dal_rules, 
+                           int* num_udal_rules) {
+    int num_dals = 0;
+    int num_udals = 0;
+    int i;
+    int which_strlen = strlen("which");
+    for (i = 0; i < opt_count; i++) {
+        if (!strcmp(opts[i]->key, "rule")) {
+            //now check if it is a dal or udal, THIS MUST BE REINFORCED IN THE CONFIG
+            if (!strncmp(opts[i]->val.value.str, "which", which_strlen)
+                && (opts[i]->val.value.str[which_strlen + 1] == 'd')) {
+                num_dals ++;
+            }
+            else if (!strncmp(opts[i]->val.value.str, "which", which_strlen)
+                     && (opts[i]->val.value.str[which_strlen + 1] == 'u')) {
+                num_udals ++;
+            }
+        }
+    }
+
+    *num_dal_rules = num_dals;
+    *num_udal_rules = num_udals;
+}
+
+
 int fuzzy_config(struct DAL*     dal,
               xDALConfigOpt** opts,
               size_t          opt_count) {
@@ -2309,7 +1891,19 @@ int fuzzy_config(struct DAL*     dal,
 
     enum dal_type wrap_dal;
     int ret = 0;
+    int num_dal_rules = 0;
+    int num_udal_rules = 0;
     int i;
+    //first pass, check how many rules for dal, how many rules for udal
+    get_num_dal_udal_rules(opts, opt_count, &num_dal_rules, &num_udal_rules);
+
+    printf("fuzzy_config: number of dal rules %d; number of udal rules %d\n", num_dal_rules, num_udal_rules);
+    config->dal_rules.num_rules = num_dal_rules;
+    config->udal_rules.num_rules = num_udal_rules;
+    config->dal_rules.rules = (Rule*)malloc(num_dal_rules * sizeof(Rule));
+    config->udal_rules.rules = (Server_Rule*)malloc(num_udal_rules * sizeof(Server_Rule));
+
+    //second pass, parse rules
     for (i = 0; i < opt_count; i++) {
         if (!strcmp(opts[i]->key, "wrap")) {
             //get the wrapped dal
@@ -2338,7 +1932,7 @@ int fuzzy_config(struct DAL*     dal,
             break;
         }
     }
-
+    config->udal_rules.check_rule = fuzzy_check_udal_rule;
     dal->global_state = config;
     EXIT();
     return ret;
@@ -2371,11 +1965,18 @@ int fuzzy_init(DAL_Context* ctx, DAL* dal, void* fh) {
         return -1;
     }
 
-    //copy config seeds into context so each context has its own seeds
-    for (i = 0; i < MAX_RULES; i++) {
-        FUZZY_CONTEXT(ctx)->ops_seeds[i] = FUZZY_CONFIG(ctx)->rules[i].seed;
+    //pass udal rules to wrapped dal context only if it is MC or MC_SOCKETS
+    if ((!strcmp(FUZZY_CONFIG(ctx)->wrap_dal->name, "MC")) || (!strcmp(FUZZY_CONFIG(ctx)->wrap_dal->name, "MC_SOCKETS"))){
+        printf("passing udal_rules from fuzzy config to wrapped mc context\n");
+        MC_CONTEXT(FUZZY_CONTEXT(ctx)->wrap_context)->udal_rules = &(FUZZY_CONFIG(ctx)->udal_rules);
     }
 
+
+    //copy config seeds into context so each context has its own seeds
+    /*for (i = 0; i < MAX_RULES; i++) {
+        FUZZY_CONTEXT(ctx)->ops_seeds[i] = FUZZY_CONFIG(ctx)->rules[i].seed;
+    }
+    */
     EXIT();
     return 0;
 }
@@ -2386,6 +1987,75 @@ int fuzzy_destroy(DAL_Context* ctx, struct DAL* dal) {
     return 0;
 }
 
+int find_matching_rule(Rule* dal_rule, int func, int pod, int cap) {
+    //first check if function type matches
+    if (dal_rule->type != func) {
+        return 0;
+    }
+
+    int ret = 0;
+    //now check if pod and cap match
+    int pod_match = (pod == dal_rule->pod) || (dal_rule->pod == -1);
+    int cap_match = (cap == dal_rule->cap) || (dal_rule->cap == -1);
+
+    if (pod_match + cap_match == 2) {
+        ret = 1;
+    }
+
+    return ret;
+}
+
+int check_fuzzy_dal_rule(int func, DAL_Context* ctx) {
+    Dal_Rules* dal_rules = &(FUZZY_CONFIG(ctx)->dal_rules);
+    int ret = -1;
+    if ((!strcmp(FUZZY_CONFIG(ctx)->wrap_dal->name, "MC")) 
+        || (!strcmp(FUZZY_CONFIG(ctx)->wrap_dal->name, "MC_SOCKETS"))) {
+        //this is MC or MC_SOCKETS, we apply rules here
+        //first we get the pod and cap from wrapped dal context
+        MC_Config* wrap_config = MC_CONFIG(FUZZY_CONTEXT(ctx)->wrap_context);
+        /*
+        uint32_t pod = MC_CONTEXT(FUZZY_CONTEXT(ctx)->wrap_context)->pod;
+        uint32_t hosts_per_pod = wrap_config->host_count / wrap_config->num_pods;
+        uint32_t pod_offset = pod * hosts_per_pod;
+        */
+        printf("check_fuzzy_dal_rule: checking func type %d pod %d cap %d\n", func, MC_CONTEXT(FUZZY_CONTEXT(ctx)->wrap_context)->pod, MC_CONTEXT(FUZZY_CONTEXT(ctx)->wrap_context)->cap);
+        int i;
+        
+        for(i = 0; i < dal_rules->num_rules; i++) {
+            if (find_matching_rule(&dal_rules->rules[i], 
+                                   func, 
+                                   MC_CONTEXT(FUZZY_CONTEXT(ctx)->wrap_context)->pod, 
+                                   MC_CONTEXT(FUZZY_CONTEXT(ctx)->wrap_context)->cap)) {
+                printf("we have a match for func %d with rule index %d\n", func, i);
+                ret = i;
+                break;
+            }
+        }
+
+    }
+
+    return ret;
+}
+
+int execute_dal_rule(DAL_Context* ctx, int rule_idx) {
+    Rule* rule = &(FUZZY_CONFIG(ctx)->dal_rules.rules[rule_idx]);
+    printf("execute dal rule rule pointer val %p rule seed %u\n", rule, rule->seed);
+    double roll = rand_r(&rule->seed) % 101;
+    int err = 0;
+    if (rule->mode == FAIL) {
+        if (roll <= (rule->fail_freq * 100)) {
+            err = rule->err;
+        }
+    }
+    else if (rule->mode == STALL) {
+        if (roll <= (rule->stall_freq * 100)) {
+            sleep(rule->stall_time_sec);
+        }
+    }
+
+    return err;
+}
+
 int fuzzy_open( DAL_Context* ctx,
                 int is_put,
                 size_t chunk_offset,
@@ -2394,36 +2064,23 @@ int fuzzy_open( DAL_Context* ctx,
                 uint16_t timeout) {
     ENTRY();
     int ret = 0;
-    double roll;
-    Rule open_rule = FUZZY_CONFIG(ctx)->rules[OPEN_RULE - 1];
 
-    //first check if there is a rule for open
-    if (open_rule.type == OPEN_RULE) {
-        if (open_rule.mode == FAIL) {
-            //this is a fail rule, roll dice
-            roll = rand_r(&(FUZZY_CONTEXT(ctx)->ops_seeds[OPEN_RULE-1])) % 101;   
-            if (roll <= (open_rule.data.fail_freq * 100)) {
-                //fail open
-                ret = open_rule.err;
-            }
-        }
-        else if (open_rule.mode == STALL) {
-            roll = rand_r(&(FUZZY_CONTEXT(ctx)->ops_seeds[OPEN_RULE-1])) % 101;
-            if (roll <= (open_rule.stall_freq * 100)) {
-                //sleep
-                sleep(open_rule.data.stall_time_sec);
-            }
-        }
+    //first check for rule
+    printf("fuzzy_open checking rules\n");
+    int rule_idx = check_fuzzy_dal_rule(OPEN_RULE, ctx);
+    if (rule_idx != -1) {
+        //there is a rule for open with pod and cap
+        ret = execute_dal_rule(ctx, rule_idx);
     }
-    //no rule for open
+
     if (!ret) {
-        //ret is not set by failure return code, so we proceed to call open
+        //run normally
         ret = FUZZY_CONFIG(ctx)->wrap_dal->open(FUZZY_CONTEXT(ctx)->wrap_context,
-                                            is_put,
-                                            chunk_offset,
-                                            content_length,
-                                            preserve_write_count,
-                                            timeout);
+                                                is_put,
+                                                chunk_offset,
+                                                content_length,
+                                                preserve_write_count,
+                                                timeout);
     }
 
     EXIT();
@@ -2434,27 +2091,14 @@ int fuzzy_open( DAL_Context* ctx,
 int fuzzy_put(DAL_Context* ctx, const char* buf, size_t size){
     ENTRY();
     int ret = 0;
-    double roll;
-    Rule write_rule = FUZZY_CONFIG(ctx)->rules[WRITE_RULE-1];
+    printf("fuzzy_put checking rules\n");
+    int rule_idx = check_fuzzy_dal_rule(WRITE_RULE, ctx);
 
-    if (write_rule.type == WRITE_RULE) {
-        if (write_rule.mode == FAIL) {
-            roll = rand_r(&(FUZZY_CONTEXT(ctx)->ops_seeds[WRITE_RULE-1])) % 101;
-            if (roll <= (write_rule.data.fail_freq * 100)) {
-                //fail write
-                ret = write_rule.err;
-            }
-        }
-        else if (write_rule.mode == STALL) {
-            roll = rand_r(&(FUZZY_CONTEXT(ctx)->ops_seeds[WRITE_RULE-1])) % 101;
-            if (roll <= (write_rule.stall_freq * 100)) {
-                //sleep write
-                sleep(write_rule.data.stall_time_sec);
-            }
-        }
+    if (rule_idx != -1) {
+        ret = execute_dal_rule(ctx, rule_idx);
     }
+
     if (!ret) {
-        //ret not set by failure return code, proceeed to call put
         ret = FUZZY_CONFIG(ctx)->wrap_dal->put(FUZZY_CONTEXT(ctx)->wrap_context,
                                                 buf,
                                                 size);
@@ -2468,24 +2112,11 @@ int fuzzy_put(DAL_Context* ctx, const char* buf, size_t size){
 ssize_t fuzzy_get(DAL_Context* ctx, char* buf, size_t size) {
     ENTRY();
     int ret = 0;
-    double roll;
-    Rule read_rule = FUZZY_CONFIG(ctx)->rules[READ_RULE-1];
+    printf("fuzzy_get checking rules\n");
+    int rule_idx = check_fuzzy_dal_rule(READ_RULE, ctx);
 
-    if (read_rule.type == READ_RULE) {
-        if (read_rule.mode == FAIL) {
-            roll = rand_r(&(FUZZY_CONTEXT(ctx)->ops_seeds[READ_RULE-1])) % 101;
-            if (roll <= (read_rule.data.fail_freq * 100)) {
-                //fail read
-                ret = read_rule.err;
-            }
-        }
-        else if (read_rule.mode == STALL) {
-            roll = rand_r(&(FUZZY_CONTEXT(ctx)->ops_seeds[READ_RULE-1])) % 101;
-            if (roll <= (read_rule.stall_freq * 100)) {
-                //sleep read
-                sleep(read_rule.data.stall_time_sec); 
-            }
-        }
+    if (rule_idx != -1) {
+        ret = execute_dal_rule(ctx, rule_idx);
     }
 
     if (!ret) {
@@ -2508,24 +2139,11 @@ int fuzzy_del(DAL_Context* ctx) {
 int fuzzy_close(DAL_Context* ctx) {
     ENTRY();
     int ret = 0;
-    double roll;
-    Rule close_rule = FUZZY_CONFIG(ctx)->rules[CLOSE_RULE-1];
+    printf("fuzz_close checking rule\n");
+    int rule_idx = check_fuzzy_dal_rule(CLOSE_RULE, ctx);
 
-    if (close_rule.type == CLOSE_RULE) {
-        if (close_rule.mode == FAIL) {
-            roll = rand_r(&(FUZZY_CONTEXT(ctx)->ops_seeds[CLOSE_RULE-1])) % 101;
-            if (roll <= (close_rule.data.fail_freq * 100)) {
-                //fail close
-                ret = close_rule.err;
-            }
-        }
-        else if (close_rule.mode == STALL) {
-            roll = rand_r(&(FUZZY_CONTEXT(ctx)->ops_seeds[CLOSE_RULE-1])) % 101;
-            if (roll <= (close_rule.stall_freq * 100)) {
-                //stall close
-                sleep(close_rule.data.stall_time_sec);
-            }
-        }
+    if (rule_idx != -1) {
+        ret = execute_dal_rule(ctx, rule_idx);
     }
 
     if (!ret) {
