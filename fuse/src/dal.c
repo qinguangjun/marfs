@@ -1232,7 +1232,6 @@ int mc_put(DAL_Context* ctx,
    }
 
    ne_handle handle = MC_HANDLE(ctx);
-   printf("mc_put calling ne_write\n");
    int written = ne_write(handle, buf, size);
 
    if(written < 0) {
@@ -1569,7 +1568,6 @@ int parse_rule(const char* rule, Fuzzy_Config* config, int dal_rule_cursor, int 
     int which_type = -1;
     
     string = strdup(rule); 
-    printf("parsing_rule: parsing rule %s\n", string);
     while ((token = strsep(&string, ",")) != NULL) {
         if (!strncmp(token, "which", 5)) {
             //still got to check if this is udal or dal....
@@ -1582,7 +1580,6 @@ int parse_rule(const char* rule, Fuzzy_Config* config, int dal_rule_cursor, int 
                 ret = 1;
             }
             else {
-                printf("Ungrecodnized dal/udal type in rule token %s\n", token); //debug purpose
                 LOG(LOG_ERR, "Ungrecodnized dal/udal type in rule token %s\n", token);
                 free(string);
                 return -1;
@@ -1612,7 +1609,6 @@ int parse_rule(const char* rule, Fuzzy_Config* config, int dal_rule_cursor, int 
                 which_func = CLOSE_RULE;
             }
             else {
-                printf("Unrecognized function in rule token %s\n", token);
                 LOG(LOG_ERR, "Unrecognized function in rule token %s\n", token);
                 free(string);
                 return -1;
@@ -1629,7 +1625,6 @@ int parse_rule(const char* rule, Fuzzy_Config* config, int dal_rule_cursor, int 
                 mode = STALL;
             }
             else {
-                printf("Unrecognized mode in rule token %s\n", token);
                 LOG(LOG_ERR, "Unrecognized mode in rule token %s\n", token);
                 free(string);
                 return -1;
@@ -1684,8 +1679,6 @@ int parse_rule(const char* rule, Fuzzy_Config* config, int dal_rule_cursor, int 
         config->dal_rules.rules[dal_rule_cursor].seed = seed;
         config->dal_rules.rules[dal_rule_cursor].pod = pod;
         config->dal_rules.rules[dal_rule_cursor].cap = cap;
-        printf("Parsed dal rule: func %d mode %d fail_freq %f stall_freq %f stall_time %d err %d seed %d pod %d cap %d\n",
-                                which_func, mode, fail_freq, stall_freq, stall_time_sec, err,config->dal_rules.rules[dal_rule_cursor].seed, pod, cap);
     }
     else if (which_type == UDAL_RULE) {
         config->udal_rules.rules[udal_rule_cursor].rule_type = which_func;
@@ -1897,7 +1890,6 @@ int fuzzy_config(struct DAL*     dal,
     //first pass, check how many rules for dal, how many rules for udal
     get_num_dal_udal_rules(opts, opt_count, &num_dal_rules, &num_udal_rules);
 
-    printf("fuzzy_config: number of dal rules %d; number of udal rules %d\n", num_dal_rules, num_udal_rules);
     config->dal_rules.num_rules = num_dal_rules;
     config->udal_rules.num_rules = num_udal_rules;
     config->dal_rules.rules = (Rule*)malloc(num_dal_rules * sizeof(Rule));
@@ -1967,7 +1959,6 @@ int fuzzy_init(DAL_Context* ctx, DAL* dal, void* fh) {
 
     //pass udal rules to wrapped dal context only if it is MC or MC_SOCKETS
     if ((!strcmp(FUZZY_CONFIG(ctx)->wrap_dal->name, "MC")) || (!strcmp(FUZZY_CONFIG(ctx)->wrap_dal->name, "MC_SOCKETS"))){
-        printf("passing udal_rules from fuzzy config to wrapped mc context\n");
         MC_CONTEXT(FUZZY_CONTEXT(ctx)->wrap_context)->udal_rules = &(FUZZY_CONFIG(ctx)->udal_rules);
     }
 
@@ -2018,7 +2009,6 @@ int check_fuzzy_dal_rule(int func, DAL_Context* ctx) {
         uint32_t hosts_per_pod = wrap_config->host_count / wrap_config->num_pods;
         uint32_t pod_offset = pod * hosts_per_pod;
         */
-        printf("check_fuzzy_dal_rule: checking func type %d pod %d cap %d\n", func, MC_CONTEXT(FUZZY_CONTEXT(ctx)->wrap_context)->pod, MC_CONTEXT(FUZZY_CONTEXT(ctx)->wrap_context)->cap);
         int i;
         
         for(i = 0; i < dal_rules->num_rules; i++) {
@@ -2026,7 +2016,6 @@ int check_fuzzy_dal_rule(int func, DAL_Context* ctx) {
                                    func, 
                                    MC_CONTEXT(FUZZY_CONTEXT(ctx)->wrap_context)->pod, 
                                    MC_CONTEXT(FUZZY_CONTEXT(ctx)->wrap_context)->cap)) {
-                printf("we have a match for func %d with rule index %d\n", func, i);
                 ret = i;
                 break;
             }
@@ -2039,7 +2028,6 @@ int check_fuzzy_dal_rule(int func, DAL_Context* ctx) {
 
 int execute_dal_rule(DAL_Context* ctx, int rule_idx) {
     Rule* rule = &(FUZZY_CONFIG(ctx)->dal_rules.rules[rule_idx]);
-    printf("execute dal rule rule pointer val %p rule seed %u\n", rule, rule->seed);
     double roll = rand_r(&rule->seed) % 101;
     int err = 0;
     if (rule->mode == FAIL) {
@@ -2066,8 +2054,8 @@ int fuzzy_open( DAL_Context* ctx,
     int ret = 0;
 
     //first check for rule
-    printf("fuzzy_open checking rules\n");
     int rule_idx = check_fuzzy_dal_rule(OPEN_RULE, ctx);
+
     if (rule_idx != -1) {
         //there is a rule for open with pod and cap
         ret = execute_dal_rule(ctx, rule_idx);
@@ -2091,7 +2079,6 @@ int fuzzy_open( DAL_Context* ctx,
 int fuzzy_put(DAL_Context* ctx, const char* buf, size_t size){
     ENTRY();
     int ret = 0;
-    printf("fuzzy_put checking rules\n");
     int rule_idx = check_fuzzy_dal_rule(WRITE_RULE, ctx);
 
     if (rule_idx != -1) {
@@ -2103,7 +2090,6 @@ int fuzzy_put(DAL_Context* ctx, const char* buf, size_t size){
                                                 buf,
                                                 size);
     }
-
     EXIT();
     return ret;
 }
@@ -2112,7 +2098,6 @@ int fuzzy_put(DAL_Context* ctx, const char* buf, size_t size){
 ssize_t fuzzy_get(DAL_Context* ctx, char* buf, size_t size) {
     ENTRY();
     int ret = 0;
-    printf("fuzzy_get checking rules\n");
     int rule_idx = check_fuzzy_dal_rule(READ_RULE, ctx);
 
     if (rule_idx != -1) {
@@ -2124,7 +2109,6 @@ ssize_t fuzzy_get(DAL_Context* ctx, char* buf, size_t size) {
                                                 buf,
                                                 size);
     }
-
     EXIT();
     return ret;
 }
@@ -2139,7 +2123,6 @@ int fuzzy_del(DAL_Context* ctx) {
 int fuzzy_close(DAL_Context* ctx) {
     ENTRY();
     int ret = 0;
-    printf("fuzz_close checking rule\n");
     int rule_idx = check_fuzzy_dal_rule(CLOSE_RULE, ctx);
 
     if (rule_idx != -1) {
@@ -2149,7 +2132,6 @@ int fuzzy_close(DAL_Context* ctx) {
     if (!ret) {
         ret = FUZZY_CONFIG(ctx)->wrap_dal->close(FUZZY_CONTEXT(ctx)->wrap_context);
     }
-
     EXIT();
     return ret;
 }
